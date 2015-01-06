@@ -529,7 +529,9 @@ Public Sub ExportAllSource()
             'SystemObject = -2147483648
             If Not (((td.Attributes And 2) = 2) Or ((td.Attributes And -2147483648#) = -2147483648#) _
                 Or ((td.Attributes And TableDefAttributeEnum.dbAttachedTable) = TableDefAttributeEnum.dbAttachedTable) _
-                Or ((td.Attributes And TableDefAttributeEnum.dbAttachedODBC) = TableDefAttributeEnum.dbAttachedODBC)) Then
+                Or ((td.Attributes And TableDefAttributeEnum.dbAttachedODBC) = TableDefAttributeEnum.dbAttachedODBC) _
+                Or ((td.Attributes And TableDefAttributeEnum.dbHiddenObject) = TableDefAttributeEnum.dbHiddenObject) _
+                Or ((td.Attributes And TableDefAttributeEnum.dbSystemObject) = TableDefAttributeEnum.dbSystemObject)) Then
                 ExportTableWithoutData td.Name, obj_path
                 obj_count = obj_count + 1
             End If
