@@ -1,3 +1,4 @@
+Attribute VB_Name = "AppCodeImportExport"
 ' Access Module `AppCodeImportExport`
 ' -----------------------------------
 '
@@ -32,7 +33,6 @@
 ' * Maybe integrate into a dialog box triggered by a menu item.
 ' * Warning of destructive overwrite.
 
-Attribute VB_Name = "AppCodeImportExport"
 Option Compare Database
 Option Explicit
 
@@ -233,7 +233,7 @@ Private Function TempFile() As String
 End Function
 
 ' Export a database object with optional UCS2-to-UTF-8 conversion.
-Private Sub ExportObject(obj_type_num As Integer, obj_name As String, file_path As String, _
+Private Sub ExportObject(ByVal obj_type_num As AcObjectType, obj_name As String, file_path As String, _
     Optional Ucs2Convert As Boolean = False)
 
     MkDirIfNotExist Left(file_path, InStrRev(file_path, "\"))
@@ -246,7 +246,7 @@ Private Sub ExportObject(obj_type_num As Integer, obj_name As String, file_path 
 End Sub
 
 ' Import a database object with optional UTF-8-to-UCS2 conversion.
-Private Sub ImportObject(obj_type_num As Integer, obj_name As String, file_path As String, _
+Private Sub ImportObject(ByVal obj_type_num As AcObjectType, obj_name As String, file_path As String, _
     Optional Ucs2Convert As Boolean = False)
 
     If Ucs2Convert Then
@@ -491,7 +491,7 @@ Public Sub ExportAllSource()
 
     obj_path = source_path & "queries\"
     ClearTextFilesFromDir obj_path, "bas"
-    Debug.Print PadRight("Exporting queries...", 24);
+    Debug.Print PadRight("Exporting queries...", 30);
     obj_count = 0
     For Each qry In db.QueryDefs
         If Left(qry.Name, 1) <> "~" Then
@@ -507,7 +507,7 @@ Public Sub ExportAllSource()
     
     Dim td As TableDef
     obj_count = 0
-    Debug.Print PadRight("Exporting tables...", 24);
+    Debug.Print PadRight("Exporting tables...", 30);
     For Each td In CurrentDb.TableDefs
 
         
@@ -544,12 +544,13 @@ Public Sub ExportAllSource()
     Next
     Debug.Print "[" & obj_count & "]"
 
+    'There is no list of data macros, so we have to use the list of tables
     For Each obj_type In Split( _
         "forms|Forms|" & acForm & "," & _
         "reports|Reports|" & acReport & "," & _
         "macros|Scripts|" & acMacro & "," & _
-        "modules|Modules|" & acModule _
-        , "," _
+        "modules|Modules|" & acModule & "," & _
+        "tables\macros|Tables|" & acTableDataMacro, "," _
     )
         obj_type_split = Split(obj_type, "|")
         obj_type_label = obj_type_split(0)
@@ -558,7 +559,7 @@ Public Sub ExportAllSource()
         obj_path = source_path & obj_type_label & "\"
         obj_count = 0
         ClearTextFilesFromDir obj_path, "bas"
-        Debug.Print PadRight("Exporting " & obj_type_label & "...", 24);
+        Debug.Print PadRight("Exporting " & obj_type_label & "...", 30);
         For Each doc In db.Containers(obj_type_name).Documents
             If Left(doc.Name, 1) <> "~" Then
                 If obj_type_label = "modules" Then
@@ -566,8 +567,17 @@ Public Sub ExportAllSource()
                 Else
                     ucs2 = UsingUcs2
                 End If
+                'this is very bad - needs proper error handling
+                'done for tables that don't have macros - export throws error
+                On Error GoTo Err_ExportObj:
                 ExportObject obj_type_num, doc.Name, obj_path & doc.Name & ".bas", ucs2
+                If obj_type_num = acTableDataMacro Then FormatDataMacro obj_path & doc.Name & ".bas"
                 obj_count = obj_count + 1
+                GoTo Err_ExportObj_Fin:
+Err_ExportObj:
+                Resume Err_ExportObj_Fin:
+Err_ExportObj_Fin:
+                On Error GoTo 0
             End If
         Next
         Debug.Print "[" & obj_count & "]"
@@ -630,7 +640,7 @@ Public Sub ImportAllSource()
     End If
 
     obj_path = source_path & "tables\"
-    FileName = Dir(obj_path & "*.txt")
+    FileName = Dir(obj_path & "*.xml")
     If Len(FileName) > 0 Then
         Debug.Print PadRight("Importing tables...", 24);
         obj_count = 0
@@ -647,8 +657,8 @@ Public Sub ImportAllSource()
         "forms|" & acForm & "," & _
         "reports|" & acReport & "," & _
         "macros|" & acMacro & "," & _
-        "modules|" & acModule _
-        , "," _
+        "modules|" & acModule & "," & _
+        "tables\macros|" & acTableDataMacro, "," _
     )
         obj_type_split = Split(obj_type, "|")
         obj_type_label = obj_type_split(0)
@@ -771,7 +781,7 @@ Private Sub ImportTable(tblName As String, obj_path As String)
 
 End Sub
 
-Public Sub SanitizeXML(filePath As String)
+Private Sub SanitizeXML(filePath As String)
 
     Dim saveStream As ADODB.Stream
 
@@ -817,3 +827,66 @@ Public Sub SanitizeXML(filePath As String)
     saveStream.Close
 
 End Sub
+
+'Splits exported DataMacro XML onto multiple lines
+'Allows git to find changes within lines using diff
+Private Sub FormatDataMacro(filePath As String)
+
+    Dim saveStream As ADODB.Stream
+
+    Set saveStream = CreateObject("ADODB.Stream")
+    saveStream.Charset = "utf-8"
+    saveStream.Type = adTypeText
+    saveStream.Open
+
+    Dim objStream As ADODB.Stream
+    Dim strData As String
+    Set objStream = CreateObject("ADODB.Stream")
+
+    objStream.Charset = "utf-8"
+    objStream.Type = adTypeText
+    objStream.Open
+    objStream.LoadFromFile (filePath)
+    
+    Do While Not objStream.EOS
+        strData = objStream.ReadText(adReadLine)
+
+        Dim tag As Variant
+        
+        For Each tag In Split(strData, ">")
+            If tag <> "" Then
+                saveStream.WriteText tag & ">", adWriteLine
+            End If
+        Next
+        
+    Loop
+    
+    objStream.Close
+    saveStream.SaveToFile filePath, adSaveCreateOverWrite
+    saveStream.Close
+
+End Sub
+
+
+
+Public Sub testExportObject(obj_type_num As AcObjectType, obj_name As String, file_path As String, _
+    Optional Ucs2Convert As Boolean = False)
+    ExportObject obj_type_num, obj_name, file_path & obj_name & ".bas", Ucs2Convert
+    
+    If obj_type_num <> acModule Then
+        SanitizeTextFiles file_path, "bas"
+    End If
+
+
+    DelIfExist TempFile()
+
+End Sub
+
+Public Sub testImportObject(obj_type_num As AcObjectType, obj_name As String, file_path As String, _
+    Optional Ucs2Convert As Boolean = False)
+    ImportObject obj_type_num, obj_name, file_path, Ucs2Convert
+
+    DelIfExist TempFile()
+    
+End Sub
+
