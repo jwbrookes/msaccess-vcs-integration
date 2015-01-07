@@ -528,12 +528,17 @@ Public Sub ExportAllSource()
             'HiddenObject = 2
             'SystemObject = -2147483648
             If Not (((td.Attributes And 2) = 2) Or ((td.Attributes And -2147483648#) = -2147483648#) _
-                Or ((td.Attributes And TableDefAttributeEnum.dbAttachedTable) = TableDefAttributeEnum.dbAttachedTable) _
-                Or ((td.Attributes And TableDefAttributeEnum.dbAttachedODBC) = TableDefAttributeEnum.dbAttachedODBC) _
                 Or ((td.Attributes And TableDefAttributeEnum.dbHiddenObject) = TableDefAttributeEnum.dbHiddenObject) _
                 Or ((td.Attributes And TableDefAttributeEnum.dbSystemObject) = TableDefAttributeEnum.dbSystemObject)) Then
-                ExportTableWithoutData td.Name, obj_path
-                obj_count = obj_count + 1
+                    If ((td.Attributes And TableDefAttributeEnum.dbAttachedTable) = TableDefAttributeEnum.dbAttachedTable) _
+                        Or ((td.Attributes And TableDefAttributeEnum.dbAttachedODBC) = TableDefAttributeEnum.dbAttachedODBC) Then
+                        ExportLinkedTable td.Name, obj_path
+                
+                    Else
+                
+                    ExportTableWithoutData td.Name, obj_path
+                    obj_count = obj_count + 1
+                End If
             End If
 
         Else
@@ -641,17 +646,29 @@ Public Sub ImportAllSource()
 
     obj_path = source_path & "tables\"
     FileName = Dir(obj_path & "*.xml")
+    Debug.Print PadRight("Importing tables...", 24);
+    obj_count = 0
     If Len(FileName) > 0 Then
-        Debug.Print PadRight("Importing tables...", 24);
-        obj_count = 0
         Do Until Len(FileName) = 0
             obj_name = Mid(FileName, 1, InStrRev(FileName, ".") - 1)
             ImportTable CStr(obj_name), obj_path
             obj_count = obj_count + 1
             FileName = Dir()
         Loop
-        Debug.Print "[" & obj_count & "]"
     End If
+    
+    'import linked tables
+    FileName = Dir(obj_path & "*.LNKD")
+    If Len(FileName) > 0 Then
+        Do Until Len(FileName) = 0
+            obj_name = Mid(FileName, 1, InStrRev(FileName, ".") - 1)
+            ImportLinkedTable CStr(obj_name), obj_path
+            obj_count = obj_count + 1
+            FileName = Dir()
+        Loop
+    End If
+    
+    Debug.Print "[" & obj_count & "]"
 
     For Each obj_type In Split( _
         "forms|" & acForm & "," & _
@@ -700,14 +717,14 @@ Public Function TableExportSql(tbl_name As String)
     sb = Sb_Init()
     Sb_Append sb, "SELECT "
     count = 0
-    For Each fieldObj In rs.Fields
+    For Each fieldObj In rs.fields
         If count > 0 Then Sb_Append sb, ", "
         Sb_Append sb, "[" & fieldObj.Name & "]"
         count = count + 1
     Next
     Sb_Append sb, " FROM [" & tbl_name & "] ORDER BY "
     count = 0
-    For Each fieldObj In rs.Fields
+    For Each fieldObj In rs.fields
         If count > 0 Then Sb_Append sb, ", "
         Sb_Append sb, "[" & fieldObj.Name & "]"
         count = count + 1
@@ -730,18 +747,18 @@ Private Sub ExportTable(tbl_name As String, obj_path As String)
 
     Set rs = CurrentDb.OpenRecordset(TableExportSql(tbl_name))
     C = 0
-    For Each fieldObj In rs.Fields
-        If C <> 0 Then OutFile.write vbTab
+    For Each fieldObj In rs.fields
+        If C <> 0 Then OutFile.Write vbTab
         C = C + 1
-        OutFile.write fieldObj.Name
+        OutFile.Write fieldObj.Name
     Next
-    OutFile.write vbCrLf
+    OutFile.Write vbCrLf
 
     rs.MoveFirst
     Do Until rs.EOF
         C = 0
-        For Each fieldObj In rs.Fields
-            If C <> 0 Then OutFile.write vbTab
+        For Each fieldObj In rs.fields
+            If C <> 0 Then OutFile.Write vbTab
             C = C + 1
             Value = rs(fieldObj.Name)
             If IsNull(Value) Then
@@ -753,9 +770,9 @@ Private Sub ExportTable(tbl_name As String, obj_path As String)
                 Value = Replace(Value, vbLf, "\n")
                 Value = Replace(Value, vbTab, "\t")
             End If
-            OutFile.write Value
+            OutFile.Write Value
         Next
-        OutFile.write vbCrLf
+        OutFile.Write vbCrLf
         rs.MoveNext
     Loop
     rs.Close
@@ -867,6 +884,114 @@ Private Sub FormatDataMacro(filePath As String)
 
 End Sub
 
+Public Sub ImportLinkedTable(tblName As String, obj_path As String)
+    Dim db As Database ' DAO.Database
+    Dim fso, InFile As Object
+    
+    Set db = CurrentDb
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    ConvertUtf8Ucs2 obj_path & tblName & ".LNKD", TempFile()
+    ' open file for reading with Create=False, Unicode=True (USC-2 Little Endian format)
+    Set InFile = fso.OpenTextFile(TempFile(), ForReading, False, TristateTrue)
+    
+    On Error GoTo err_notable:
+    DoCmd.DeleteObject acTable, tblName
+    
+    GoTo err_notable_fin:
+err_notable:
+    Err.Clear
+    Resume err_notable_fin:
+err_notable_fin:
+    On Error GoTo Err_CreateLinkedTable:
+    
+    Dim td As TableDef
+    Set td = db.CreateTableDef(InFile.ReadLine())
+    td.Connect = InFile.ReadLine()
+    td.SourceTableName = InFile.ReadLine()
+    db.TableDefs.Append td
+    
+    GoTo Err_CreateLinkedTable_Fin:
+    
+Err_CreateLinkedTable:
+    MsgBox Err.Description, vbCritical, "ERROR: IMPORT LINKED TABLE"
+    Resume Err_CreateLinkedTable_Fin:
+Err_CreateLinkedTable_Fin:
+
+    'this will throw errors if a primary key already exists or the table is linked to an access database table
+    'will also error out if no pk is present
+    On Error GoTo Err_LinkPK_Fin:
+    
+    Dim fields As String
+    fields = InFile.ReadLine()
+    Dim field As Variant
+    Dim sql As String
+    sql = "CREATE INDEX __uniqueindex ON " & td.Name & " ("
+    
+    For Each field In Split(fields, ";+")
+        sql = sql & "[" & field & "]" & ","
+    Next
+    'remove extraneous comma
+    sql = Left(sql, Len(sql) - 1)
+    
+    sql = sql & ") WITH PRIMARY"
+    CurrentDb.Execute sql
+    
+Err_LinkPK_Fin:
+    
+    InFile.Close
+    
+   
+
+End Sub
+
+Public Sub ExportLinkedTable(tbl_name As String, obj_path As String)
+    On Error GoTo Err_LinkedTable:
+    
+    Dim fso, OutFile
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    ' open file for writing with Create=True, Unicode=True (USC-2 Little Endian format)
+    MkDirIfNotExist obj_path
+    Set OutFile = fso.CreateTextFile(TempFile(), True, True)
+
+    OutFile.Write CurrentDb.TableDefs(tbl_name).Name
+    OutFile.Write vbCrLf
+    OutFile.Write CurrentDb.TableDefs(tbl_name).Connect
+    OutFile.Write vbCrLf
+    OutFile.Write CurrentDb.TableDefs(tbl_name).SourceTableName
+    OutFile.Write vbCrLf
+    
+
+    Dim db As Database
+    Set db = CurrentDb
+    Dim td As TableDef
+    Set td = db.TableDefs(tbl_name)
+    Dim idx As Index
+    
+    For Each idx In td.Indexes
+        If idx.Primary Then
+            OutFile.Write Right(idx.fields, Len(idx.fields) - 1)
+            OutFile.Write vbCrLf
+        End If
+
+    Next
+    
+
+Err_LinkedTable_Fin:
+
+    OutFile.Close
+    'save files as .odbc
+    ConvertUcs2Utf8 TempFile(), obj_path & tbl_name & ".LNKD"
+    
+    Exit Sub
+    
+Err_LinkedTable:
+
+    OutFile.Close
+    MsgBox Err.Description, vbCritical, "ERROR: EXPORT LINKED TABLE"
+    Resume Err_LinkedTable_Fin:
+End Sub
 
 
 Public Sub testExportObject(obj_type_num As AcObjectType, obj_name As String, file_path As String, _
