@@ -800,26 +800,26 @@ End Sub
 
 Private Sub SanitizeXML(filePath As String)
 
-    Dim saveStream As ADODB.Stream
+    Dim saveStream As Object 'ADODB.Stream
 
     Set saveStream = CreateObject("ADODB.Stream")
     saveStream.Charset = "utf-8"
-    saveStream.LineSeparator = adLF
-    saveStream.Type = adTypeText
+    saveStream.LineSeparator = 10 'adLF
+    saveStream.Type = 2 'adTypeText
     saveStream.Open
 
-    Dim objStream As ADODB.Stream
+    Dim objStream As Object 'ADODB.Stream
     Dim strData As String
     Set objStream = CreateObject("ADODB.Stream")
 
     objStream.Charset = "utf-8"
-    objStream.LineSeparator = adLF
-    objStream.Type = adTypeText
+    objStream.LineSeparator = 10 'adLF
+    objStream.Type = 2 'adTypeText
     objStream.Open
     objStream.LoadFromFile (filePath)
 
     Do While objStream.EOS = False
-    strData = objStream.ReadText(adReadLine)
+    strData = objStream.ReadText(-2) 'adReadLine
     If InStr(strData, "<dataroot xmlns:xsi=""http://www.w3.org/2001/XMLSchema-instance"" generated=") = 1 Then
         strData = Left(strData, InStr(strData, "generated=") - 2)
         
@@ -832,15 +832,15 @@ Private Sub SanitizeXML(filePath As String)
             strData = strData & ">" & Chr(&HD)
         End If
         
-        saveStream.WriteText strData, adWriteLine
+        saveStream.WriteText strData, 1 'adWriteLine
     Else
         'adWriteLine or LF will be missed off - line seperator removed when line is read
-        saveStream.WriteText strData, adWriteLine
+        saveStream.WriteText strData, 1 'adWriteLine
     End If
 
     Loop
     objStream.Close
-    saveStream.SaveToFile filePath, adSaveCreateOverWrite
+    saveStream.SaveToFile filePath, 2 'adSaveCreateOverWrite
     saveStream.Close
 
 End Sub
@@ -849,37 +849,37 @@ End Sub
 'Allows git to find changes within lines using diff
 Private Sub FormatDataMacro(filePath As String)
 
-    Dim saveStream As ADODB.Stream
+    Dim saveStream As Object 'ADODB.Stream
 
     Set saveStream = CreateObject("ADODB.Stream")
     saveStream.Charset = "utf-8"
-    saveStream.Type = adTypeText
+    saveStream.Type = 2 'adTypeText
     saveStream.Open
 
-    Dim objStream As ADODB.Stream
+    Dim objStream As Object 'ADODB.Stream
     Dim strData As String
     Set objStream = CreateObject("ADODB.Stream")
 
     objStream.Charset = "utf-8"
-    objStream.Type = adTypeText
+    objStream.Type = 2 'adTypeText
     objStream.Open
     objStream.LoadFromFile (filePath)
     
     Do While Not objStream.EOS
-        strData = objStream.ReadText(adReadLine)
+        strData = objStream.ReadText(-2) 'adReadLine
 
         Dim tag As Variant
         
         For Each tag In Split(strData, ">")
             If tag <> "" Then
-                saveStream.WriteText tag & ">", adWriteLine
+                saveStream.WriteText tag & ">", 1 'adWriteLine
             End If
         Next
         
     Loop
     
     objStream.Close
-    saveStream.SaveToFile filePath, adSaveCreateOverWrite
+    saveStream.SaveToFile filePath, 2 'adSaveCreateOverWrite
     saveStream.Close
 
 End Sub
