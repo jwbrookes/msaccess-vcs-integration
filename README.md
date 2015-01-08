@@ -1,6 +1,8 @@
 msaccess-vcs-integration
 ========================
 
+This repo is defunct and no longer maintained! The active version is [here](https://github.com/timabell/msaccess-vcs-integration.git)
+=========================
 Synchronize your Access Forms, Macros, Modules, Queries, and Reports with a version control system.
 
 *This code is built and tested on Microsoft Access 2010. It will probably work in earlier versions, but YMMV.*
