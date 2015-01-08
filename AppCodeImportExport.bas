@@ -489,6 +489,9 @@ Public Sub ExportAllSource()
 
     Debug.Print
 
+    Debug.Print PadRight("Exporting references...", 30);
+    Debug.Print "[" & ExportRefsUTF8(source_path & "references\") & "]"
+
     obj_path = source_path & "queries\"
     ClearTextFilesFromDir obj_path, "bas"
     Debug.Print PadRight("Exporting queries...", 30);
@@ -630,6 +633,9 @@ Public Sub ImportAllSource()
 
     Debug.Print
 
+    Debug.Print PadRight("Importing references...", 24);
+    Debug.Print "[" & ImportRefsUTF8(source_path & "references\") & "]"
+
     obj_path = source_path & "queries\"
     FileName = Dir(obj_path & "*.bas")
     If Len(FileName) > 0 Then
@@ -701,6 +707,7 @@ Public Sub ImportAllSource()
             Debug.Print "[" & obj_count & "]"
         End If
     Next
+
 
     DelIfExist TempFile()
     Debug.Print "Done."
@@ -993,6 +1000,67 @@ Err_LinkedTable:
     Resume Err_LinkedTable_Fin:
 End Sub
 
+
+Public Function AddRef(refPath As String) As Boolean
+
+On Error GoTo Err_AddRef:
+    Application.References.AddFromFile refPath
+    AddRef = True
+    Exit Function
+Err_AddRef:
+    '32813 is a duplicate entry error - we expect to see this for the default libraries as they will already be present
+    If Err.Number <> 32813 Then
+        Debug.Print "Failed to add reference: " & refPath
+        Debug.Print Err.Description
+    End If
+    AddRef = False
+End Function
+
+'Exports references and returns a count of the references exported
+Private Function ExportRefsUTF8(filePath As String) As Integer
+    MkDirIfNotExist filePath
+
+    ExportRefsUTF8 = 0
+    
+    Dim saveStream As Object 'ADODB.Stream
+
+    Set saveStream = CreateObject("ADODB.Stream")
+    saveStream.Charset = "utf-8"
+    saveStream.Type = 2 'adTypeText
+    saveStream.Open
+    
+    Dim ref As Reference
+
+    For Each ref In Application.References
+        saveStream.WriteText ref.FullPath, 1 'adWriteLine
+        ExportRefsUTF8 = ExportRefsUTF8 + 1
+    Next
+
+    saveStream.SaveToFile filePath & "references.txt", 2 'adSaveCreateOverWrite
+    saveStream.Close
+
+End Function
+
+Private Function ImportRefsUTF8(filePath As String) As Integer
+    ImportRefsUTF8 = 0
+    Dim objStream As Object 'ADODB.Stream
+    Dim strData As String
+    Set objStream = CreateObject("ADODB.Stream")
+
+    objStream.Charset = "utf-8"
+    objStream.Type = 2 'adTypeText
+    objStream.Open
+    objStream.LoadFromFile (filePath & "references.txt")
+    
+    Do While Not objStream.EOS
+        strData = objStream.ReadText(-2) 'adReadLine
+
+        If AddRef(strData) Then ImportRefsUTF8 = ImportRefsUTF8 + 1
+    Loop
+    
+    objStream.Close
+
+End Function
 
 Public Sub testExportObject(obj_type_num As AcObjectType, obj_name As String, file_path As String, _
     Optional Ucs2Convert As Boolean = False)
